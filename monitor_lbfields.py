@@ -51,15 +51,15 @@ unpack_thread=None
 unpack_name=None
 verify_thread=None
 verify_name=None
-totallimit=20
-staginglimit=2
-maxstaged=6
+totallimit=3 #Total number of fields being processed
+staginglimit=1 #Number of LTA to stage at any time
+maxstaged=1 #Number of LTA to stage at any time
 
 ## cluster specific queuing limits
 if cluster == 'spider':
     maxqueue = 10
 if cluster == 'cosma':
-    maxqueue = 3
+    maxqueue = 1
 
 '''
 updated in MySQL_utils.py:
@@ -264,6 +264,17 @@ def do_verify(field):
 
 while True:
 
+    myPointings = ['P348+33',
+                    'P250+33',
+                    'P201+25',
+                    'P011+29',
+                    'P144+29',
+                    'P180+62',
+                    'P30Hetdex06',
+                    'P152+62',
+                    'P177+37',
+                    'P137+47']
+
     with SurveysDB(readonly=True) as sdb:
         #### CHANGE QUERIES TO USE TARGET TABLE
         sdb.cur.execute('select * from lb_fields where clustername="'+cluster+'" and username="'+user+'" order by priority,id')
@@ -272,6 +283,10 @@ while True:
         result2=sdb.cur.fetchall()
         if len(result2)>0:
             nextfield=result2[0]['id']
+            for res in result2:
+                if res['id'] in myPointings:
+                    nextfield = res['id']
+                    break
         else:
             nextfield=None
 
@@ -336,8 +351,9 @@ while True:
         nstaged = d['Staged']
     else:
         nstaged = 0
-    check_stage = (nstage <=2) + (nstaged <= maxstaged)
-    if check_stage == 1:
+    check_stage = (nstage < staginglimit) + (nstaged < maxstaged)
+    print(check_stage)
+    if check_stage == 1 or check_stage == 0:
         do_stage = False
     else:
         do_stage = True
@@ -379,39 +395,39 @@ while True:
         unpack_thread=threading.Thread(target=do_unpack, args=(unpack_name,))
         unpack_thread.start()
 
-    if 'Unpacked' in d:
-        if 'Queued' in d:
-            nq = d['Queued']
-        else:
-            nq = 0
-        for field in fd['Unpacked']:
-            if nq <= maxqueue:
-                nq = nq + 1
-                print('Running a new job',field)
-                update_status(field,'Queued')
-                ### will need to change the script
-                command="sbatch -J %s %s/slurm/run_linc_calibrator.sh %s" % (field, str(basedir).rstrip('/'), field)
-                if os.system(command):
-                    update_status(field,"Submission failed")
-            else:
-                print( 'Queue is full, {:s} waiting for submission'.format(field) )
+    # if 'Unpacked' in d:
+    #     if 'Queued' in d:
+    #         nq = d['Queued']
+    #     else:
+    #         nq = 0
+    #     for field in fd['Unpacked']:
+    #         if nq <= maxqueue:
+    #             nq = nq + 1
+    #             print('Running a new job',field)
+    #             update_status(field,'Queued')
+    #             ### will need to change the script
+    #             command="sbatch -J %s %s/slurm/run_linc_calibrator.sh %s" % (field, str(basedir).rstrip('/'), field)
+    #             if os.system(command):
+    #                 update_status(field,"Submission failed")
+    #         else:
+    #             print( 'Queue is full, {:s} waiting for submission'.format(field) )
 
-    if 'Queued' in d:
-        for field in fd['Queued']:
-            print('Verifying processing for',field)
-            outdir = os.path.join(procdir,field)
-            if os.path.isfile(os.path.join(outdir,'finished.txt')):        
-                result = check_field(field)
-                if result:
-                    update_status(field,'Verified')
-                else:
-                    update_status(field,'Workflow failed')
+    # if 'Queued' in d:
+    #     for field in fd['Queued']:
+    #         print('Verifying processing for',field)
+    #         outdir = os.path.join(procdir,field)
+    #         if os.path.isfile(os.path.join(outdir,'finished.txt')):        
+    #             result = check_field(field)
+    #             if result:
+    #                 update_status(field,'Verified')
+    #             else:
+    #                 update_status(field,'Workflow failed')
 
-    ## this will also need to be changed to use macaroons to copy back to spider
-    if 'Verified' in d and verify_thread is None:
-        verify_name = fd['Verified'][0]
-        verify_thread=threading.Thread(target=do_verify, args=(verify_name,))
-        verify_thread.start()
+    # ## this will also need to be changed to use macaroons to copy back to spider
+    # if 'Verified' in d and verify_thread is None:
+    #     verify_name = fd['Verified'][0]
+    #     verify_thread=threading.Thread(target=do_verify, args=(verify_name,))
+    #     verify_thread.start()
 
 
     print('\n\n-----------------------------------------------\n\n')
